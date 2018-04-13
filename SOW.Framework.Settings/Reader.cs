@@ -1,4 +1,16 @@
-﻿using System;
+//------------------------------------------------------------------------------
+// <copyright file="Reader.cs" company="SOW">
+//     Copyright (c) SOW.  All rights reserved.
+// </copyright>                                                                
+// <owner current="true" primary="true">[....]</owner>
+// <owner current="true" primary="false">[....]</owner>
+// <owner current="false" primary="false">[....]</owner>
+//------------------------------------------------------------------------------
+/*
+ * Build On Feb 14, 2018
+ * 01:10:12 AM GMT+0600 (BDT)
+ */
+using System;
 using System.IO;
 using System.Web;
 using System.Web.Script.Serialization;
