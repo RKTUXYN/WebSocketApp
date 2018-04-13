@@ -1,5 +1,5 @@
 ﻿//------------------------------------------------------------------------------
-// <copyright file="Core.cs" company="SOW">
+// <copyright file="WebSocketHandler.cs" company="SOW">
 //     Copyright (c) SOW.  All rights reserved.
 // </copyright>                                                                
 // <owner current="true" primary="true">[....]</owner>
