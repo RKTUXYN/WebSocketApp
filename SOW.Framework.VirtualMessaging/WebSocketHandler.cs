@@ -72,6 +72,9 @@ namespace SOW.Framework.VirtualMessaging {
             if (info == null) return;
             context.AcceptWebSocketRequest(( wsc ) => {
                 return new Task(( ) => InitializeWebSocket(info, chatEnable, wsc.WebSocket, ct));
+            }, new System.Web.WebSockets.AspNetWebSocketOptions {
+                SubProtocol = context.Request.Headers["Sec-WebSocket-Protocol"],
+                RequireSameOrigin = false
             });
 
         }
