@@ -1,4 +1,4 @@
-﻿//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 // <copyright file="Util.cs" company="SOW">
 //     Copyright (c) SOW.  All rights reserved.
 // </copyright>                                                                
@@ -12,7 +12,9 @@
  */
 namespace SOW.Framework.VirtualMessaging.Util {
     using System.Collections.Generic;
-    enum TaskType {
+    // An enumerated type for the connection task type
+    // process & sent to the other connection.
+    public enum TaskType {
         CONNECT_REQUEST = 1,
         SEND_MESSAGE = 2,
         CLOSE_REQUEST = 3,
@@ -26,7 +28,8 @@ namespace SOW.Framework.VirtualMessaging.Util {
         ONLINE = 11,
         CONNECTED = 12,
         DISCONNECTED = 13,
-        WAITED_CLIENT = 14
+        WAITED_CLIENT = 14,
+        NEW_CLIENT_CONNECTED = 15
     }
     [System.Serializable]
     class TypeofJsonMessage {
@@ -48,5 +51,15 @@ namespace SOW.Framework.VirtualMessaging.Util {
         public bool is_online { get; set; }
         public bool is_busy { get; set; }
         public List<string> connection { get; set; }
+    }
+    [System.Serializable]
+    public class ConnectedUserInfo {
+        public string name { get; set; }
+        public string token { get; set; }
+        public bool is_client { get; set; }
+        public string connection_token { get; set; }
+        public bool is_virtual_assistant { get; set; }
+        public bool is_online { get; set; }
+        public bool is_busy { get; set; } 
     }
 }
