@@ -1,4 +1,4 @@
-﻿//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 // <copyright file="WebSocketClient.cs" company="SOW">
 //     Copyright (c) SOW.  All rights reserved.
 // </copyright>                                                                
@@ -34,6 +34,7 @@ namespace SOW.Framework.VirtualMessaging {
         public event GetSocketClient getStaff;
         public event SendToAllStaff sendToAllStaffAsync;
         public event GetSocketClient getClient;
+        public event OnChangeStatus onChangeStatus;
         public bool _isOnLine { get; set; }
         public int _piority { get { return _userInfo.piority; } }
         public bool _is_client { get { return _userInfo.is_client; } }
@@ -71,12 +72,18 @@ namespace SOW.Framework.VirtualMessaging {
                 if (!_is_client) {
                     if (_is_virtual_assistant) {
                         //!TODO
-                        if (onConnectedAsync.Invoke(this, _ct) <= 1) {
-                            onVirtualAssistantConnectedAsync.Invoke(this, _ct);
-                        };
+                        onConnectedAsync.Invoke(this, _ct);
+                        onVirtualAssistantConnectedAsync.Invoke(this, _ct);
                     } else {
                         onConnectedAsync.Invoke(this, _ct);
                     }
+                } else {
+                    sendToAllStaffAsync.Invoke(jss.Serialize(new {
+                        token = _token,
+                        connection_token = _connection_token,
+                        status = TaskType.NEW_CLIENT_CONNECTED,
+                        message = "New client connected"
+                    }), _ct);
                 }
                 while (_sock.State == WebSocketState.Open) {
                     if (_ct.IsCancellationRequested) {
@@ -86,18 +93,16 @@ namespace SOW.Framework.VirtualMessaging {
                     var recvdbuffer = new ArraySegment<byte>(new byte[1024]);
                     WebSocketReceiveResult receiveResult;
                     receiveResult = await _sock.ReceiveAsync(recvdbuffer, _ct);
-
                     if (receiveResult.MessageType == WebSocketMessageType.Close) {
                         await CloseAsync();
                         return;
                     }
-                    /*if (receiveResult.MessageType != WebSocketMessageType.Text) {
-                        onClose.Invoke(_token, _ct);
+                    if (receiveResult.MessageType != WebSocketMessageType.Text) {
                         // This server can't handle without text frames.
-                        await _sock.CloseAsync(WebSocketCloseStatus.InvalidMessageType, "Cannot accept " + receiveResult.MessageType + " frame", CancellationToken.None);
-                        _sock.Dispose();
+                        onClose.Invoke(this, _ct);
+                        await CloseAsync("Cannot accept " + receiveResult.MessageType + " frame");
                         return;
-                    }*/
+                    }
                     try {
                         if (!PrepareMessageAsync(receiveResult.MessageType, recvdbuffer, jss)) {
                             await CloseAsync();
@@ -172,20 +177,15 @@ namespace SOW.Framework.VirtualMessaging {
             _message.Clear();
             return true;
         }
-
-        private void PublishClientAsOfflineAsync( TypeofJsonMessage jsonMessage, System.Web.Script.Serialization.JavaScriptSerializer jss ) {
-            //!TODO
-        }
-        private void PublishClientAsOnlineAsync( TypeofJsonMessage jsonMessage, System.Web.Script.Serialization.JavaScriptSerializer jss ) {
-            //!TODO
-        }
         private bool ProcessTextMessageAsync( TypeofJsonMessage jsonMessage, System.Web.Script.Serialization.JavaScriptSerializer jss ) {
             if (jsonMessage.task_type == TaskType.OFFLINE) {
-                PublishClientAsOfflineAsync(jsonMessage, jss);
+                _isOnLine = false;
+                onChangeStatus.Invoke(this, TaskType.OFFLINE, _ct);
                 return true;
             }
             if (jsonMessage.task_type == TaskType.ONLINE) {
-                PublishClientAsOnlineAsync(jsonMessage, jss);
+                _isOnLine = true;
+                onChangeStatus.Invoke(this, TaskType.ONLINE, _ct);
                 return true;
             }
             if (jsonMessage.task_type != TaskType.SEND_MESSAGE) {
@@ -202,18 +202,20 @@ namespace SOW.Framework.VirtualMessaging {
             }
             _message.Append(jsonMessage.message);
             if (_is_connected) {
-                if (!_connection.Exists(a => a == jsonMessage.connection_token)) {
-                    _connection.Add(jsonMessage.connection_token);
-                };
+                if (!_is_client) {
+                    if (!_connection.Exists(a => a == jsonMessage.connection_token)) {
+                        _connection.Add(jsonMessage.connection_token);
+                    };
+                }
                 ProcessConnectedTextMessageAsync(_connected_connection_token, jsonMessage, jss);
                 return true;
             }
             if (_is_virtual_assistant) {
                 if (!_connection.Exists(a => a == jsonMessage.connection_token)) {
                     _connection.Add(jsonMessage.connection_token);
-                    _connected_connection_token = jsonMessage.connection_token;
+                    //_connected_connection_token = jsonMessage.connection_token;
                 };
-                _connection.Add(jsonMessage.connection_token);
+                //_connection.Add(jsonMessage.connection_token);
                 return ProcessConnectedTextMessageAsync(jsonMessage.connection_token, jsonMessage, jss);
             }
             sendToAllStaffAsync.Invoke(jss.Serialize(new {
