@@ -1,5 +1,5 @@
-﻿//------------------------------------------------------------------------------
-// <copyright file="WebSocketHandler.cs" company="SOW">
+//------------------------------------------------------------------------------
+// <copyright file="Core.cs" company="SOW">
 //     Copyright (c) SOW.  All rights reserved.
 // </copyright>                                                                
 // <owner current="true" primary="true">[....]</owner>
@@ -23,7 +23,7 @@ namespace SOW.Framework.VirtualMessaging {
     public class WebSocketHandler : IDisposable {
         static object __locker = new object();
         List<WebSocketClient> _socket_client;
-        List<UserInfo> _connected_user_info;
+        List<ConnectedUserInfo> _connected_user_info;
         System.Web.Script.Serialization.JavaScriptSerializer _jss;
         System.Text.UTF8Encoding _encoding;
         int connection = 0;
@@ -31,7 +31,7 @@ namespace SOW.Framework.VirtualMessaging {
             _socket_client = new List<WebSocketClient>();
             _jss = new System.Web.Script.Serialization.JavaScriptSerializer();
             _jss.MaxJsonLength = Int32.MaxValue;
-            _connected_user_info = new List<UserInfo>();
+            _connected_user_info = new List<ConnectedUserInfo>();
             _encoding = new System.Text.UTF8Encoding(false);
         }
         private UserInfo CastUserInfo( string uiStr, Action<string, int>cb ) {
@@ -60,7 +60,6 @@ namespace SOW.Framework.VirtualMessaging {
             var wsContext = await context.AcceptWebSocketAsync(context.Request.Headers["Sec-WebSocket-Protocol"], TimeSpan.FromSeconds(30));
             InitializeWebSocket(info, chatEnable, wsContext.WebSocket, ct);
             wsContext = null; info = null;
-
         }
         public void AcceptWebSocketAsync( string uiStr, bool chatEnable, System.Web.HttpContext context, CancellationToken ct ) {
             var info = CastUserInfo(uiStr, ( a, b ) => {
@@ -111,6 +110,9 @@ namespace SOW.Framework.VirtualMessaging {
             /**[getClient]*/
             wsClient.getClient += WsClient_getClient;
             /**[/getClient]*/
+            /**[onChangeStatus]*/
+            wsClient.onChangeStatus += WsClient_onChangeStatus;
+            /**[/onChangeStatus]*/
             /**[Include New Connection]*/
             _socket_client.Add(wsClient);
             /**[/Include New Connection]*/
@@ -119,7 +121,62 @@ namespace SOW.Framework.VirtualMessaging {
             /**[/Read Client Request & Process]*/
             wsClient = null;
         }
+        #region EVENT
+        private void WsClient_onChangeStatus( WebSocketClient wsClient, TaskType taskType, CancellationToken ct ) {
+            string method = "";
+            if (wsClient == null) return;
+            if (taskType == TaskType.OFFLINE) {
+                method = "offline";
+            } else if (taskType == TaskType.ONLINE) {
+                method = "online";
+            }
+            if (string.IsNullOrEmpty(method)) return;
 
+            if (wsClient._is_client) {
+                _socket_client.Where(a => a.userInfo.is_virtual_assistant == true && (a._connected_connection_token == wsClient._token || a._connection.Exists(c => c == wsClient._token))).Select(a => {
+                    a._connected_connection_token = null;
+                    if (a._connection.Exists(c => c == wsClient._token)) {
+                        a._connection.Remove(wsClient._token);
+                    }
+                    a._is_connected = false;
+                    SendTextMessageAsync(a.socket, _jss.Serialize(new {
+                        connection_token = wsClient._token,
+                        status = taskType,
+                        method = "__on_client_" + method
+                    }), ct);
+                    return a;
+                }).ToList();
+                return;
+            }
+            if (wsClient.userInfo.is_virtual_assistant) {
+                _socket_client.Where(a => a._is_client == true && a._connected_connection_token == wsClient._token).Select(a => {
+                    a._connected_connection_token = null; a._connected_connection_token = null;
+                    SendTextMessageAsync(a.socket, _jss.Serialize(new {
+                        connection_token = wsClient._token,
+                        status = taskType,
+                        method = "__on_assistant_" + method
+                    }), ct);
+                    return a;
+                }).ToList();
+            }
+            _socket_client.Where(a => a._is_client == false && a._token != wsClient._token).Select(a => {
+                if (a._connection.Exists(c => c == wsClient._token)) {
+                    a._connection.Remove(wsClient._token);
+                }
+                SendTextMessageAsync(a.socket, _jss.Serialize(new {
+                    connection_token = wsClient._token,
+                    status = taskType,
+                    method = "__on_user_" + method
+                }), ct);
+                return a;
+            }).ToList();
+
+            WsClient_sendTextMessageAsync(wsClient, _jss.Serialize(new {
+                connection_token = wsClient._token,
+                status = taskType,
+                method = "__on_user_" + method
+            }), ct);
+        }
         private WebSocketClient WsClient_getClient( ) {
             return _socket_client.FirstOrDefault(a => a._is_connected == false && a._isOnLine == true && a._is_client == true);
         }
@@ -165,40 +222,6 @@ namespace SOW.Framework.VirtualMessaging {
                 return a;
             }).ToList();
         }
-        private int WsClient_onConnectedAsync( WebSocketClient wsClient, CancellationToken ct ) {
-            connection++;
-            if (wsClient == null) return 0;
-            if (_connected_user_info.Exists(e => e.token == wsClient._token)) {
-                SendTextMessageAsync(wsClient.socket, _jss.Serialize(new {
-                    status = TaskType.CONNECTED,
-                    users_info = _connected_user_info.Where(a => a.token != wsClient._token).ToList(),
-                    method = "__on_connected"
-                }), ct);
-                return 2;
-            }
-            _socket_client.Where(a => a._is_client == false && a._token != wsClient._token).DistinctBy(d => d._token).Select(a => {
-                SendTextMessageAsync(a.socket, _jss.Serialize(new {
-                    connection_token = wsClient._token,
-                    status = TaskType.CONNECTED,
-                    user_info = wsClient.userInfo,
-                    method = "__on_new_user_connected"
-                }), ct);
-                return a;
-            }).ToList();
-            SendTextMessageAsync(wsClient.socket, _jss.Serialize(new {
-                status = TaskType.CONNECTED,
-                users_info = _connected_user_info,
-                method = "__on_connected"
-            }), ct);
-            _connected_user_info.Add(new UserInfo {
-                name = wsClient.userInfo.name,
-                token = wsClient.userInfo.token,
-                is_online = wsClient._isOnLine,
-                is_busy = wsClient._is_busy,
-                connection = wsClient._connection
-            });
-            return 0;
-        }
         private void WsClient_onVirtualAssistantConnectedAsync( WebSocketClient wsClient, CancellationToken ct ) {
             List<UserInfo> waitedClient = new List<UserInfo>();
             _socket_client.Where(a => a._is_client == true && a._is_connected == false && a._is_busy == false && a._isOnLine == true).Select(a => {
@@ -233,22 +256,26 @@ namespace SOW.Framework.VirtualMessaging {
                         SendTextMessageAsync(a.socket, _jss.Serialize(new {
                             connection_token = wsClient._token,
                             status = TaskType.DISCONNECTED,
-                            method = "__on_user_disconnected"
+                            method = "__on_client_disconnected"
                         }), ct);
                         return a;
                     }).ToList();
                 } else {
                     if (wsClient.userInfo.is_virtual_assistant) {
                         _socket_client.Where(a => a._is_client == true && a._connected_connection_token == wsClient._token).Select(a => {
+                            a._is_connected = false; a._connected_connection_token = null;
                             SendTextMessageAsync(a.socket, _jss.Serialize(new {
                                 connection_token = wsClient._token,
                                 status = TaskType.DISCONNECTED,
-                                method = "__on_user_disconnected"
+                                method = "__on_assistant_disconnected"
                             }), ct);
                             return a;
                         }).ToList();
                     }
                     _socket_client.Where(a => a._is_client == false && a._token != wsClient._token).Select(a => {
+                        if (a._connection.Exists(c => c == wsClient._token)) {
+                            a._connection.Remove(wsClient._token);
+                        }
                         SendTextMessageAsync(a.socket, _jss.Serialize(new {
                             connection_token = wsClient._token,
                             status = TaskType.DISCONNECTED,
@@ -270,7 +297,42 @@ namespace SOW.Framework.VirtualMessaging {
             }
             return;
         }
-
+        private int WsClient_onConnectedAsync( WebSocketClient wsClient, CancellationToken ct ) {
+            connection++;
+            if (wsClient == null) return 0;
+            if (_connected_user_info.Exists(e => e.token == wsClient._token)) {
+                SendTextMessageAsync(wsClient.socket, _jss.Serialize(new {
+                    status = TaskType.CONNECTED,
+                    users_info = _connected_user_info.Where(a => a.token != wsClient._token).ToList(),
+                    method = "__on_connected"
+                }), ct);
+                return 2;
+            }
+            _socket_client.Where(a => a._is_client == false && a._token != wsClient._token).DistinctBy(d => d._token).Select(a => {
+                SendTextMessageAsync(a.socket, _jss.Serialize(new {
+                    connection_token = wsClient._token,
+                    status = TaskType.CONNECTED,
+                    user_info = wsClient.userInfo,
+                    method = "__on_new_user_connected"
+                }), ct);
+                return a;
+            }).ToList();
+            SendTextMessageAsync(wsClient.socket, _jss.Serialize(new {
+                status = TaskType.CONNECTED,
+                users_info = _connected_user_info,
+                method = "__on_connected"
+            }), ct);
+            _connected_user_info.Add(new ConnectedUserInfo {
+                name = wsClient.userInfo.name,
+                token = wsClient.userInfo.token,
+                is_online = wsClient._isOnLine,
+                is_busy = wsClient._is_busy,
+                connection_token = wsClient._connection_token,
+                is_virtual_assistant = wsClient.userInfo.is_virtual_assistant
+            });
+            return 0;
+        }
+        #endregion EVENT
         async void SendTextMessageAsync( WebSocket ws, string data, CancellationToken ct ) {
             try {
                 byte[] sendBuffer = _encoding.GetBytes(data); data = null;
